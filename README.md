@@ -13,7 +13,7 @@ React + Vite + Supabase. Дані акаунтів і кредитів збер�
 
 ```env
 VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-VITE_SUPABASE_ANON_KEY=YOUR_KEY
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_KEY
 ```
 
 3. Виконай:
@@ -32,7 +32,7 @@ npm run dev
 
 У Render → Environment додай:
 - `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
 
 Після зміни env зроби новий deploy.
 
