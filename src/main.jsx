@@ -95,34 +95,29 @@ async function importLocalDataToCloud(authUser,localUser){
 }
 
 async function importBackupFileToCloud(authUser,file){
-  if(!supabase) throw new Error('Хмарне сховище Supabase не підключене.');
+  if(!supabase) throw new Error('Supabase не підключений. Перевірте змінні VITE_SUPABASE_URL та VITE_SUPABASE_PUBLISHABLE_KEY у Render.');
   if(!file) throw new Error('Файл не вибрано.');
-  const text=await file.text();
   let backup;
-  try{backup=JSON.parse(text)}catch{throw new Error('Файл має некоректний JSON-формат.');}
-  if(backup?.version!==1 || !Array.isArray(backup.users)) throw new Error('Це не резервна копія Credit Manager версії 1.');
+  try{backup=JSON.parse(await file.text())}catch(error){throw new Error(`Не вдалося прочитати JSON-файл: ${error?.message||'невідомий формат'}`)}
+  if(!backup || backup.version!==1 || !Array.isArray(backup.users)) throw new Error('Неправильний формат резервної копії. Потрібен credit-manager-backup.json версії 1.');
   const users=backup.users.filter(Boolean);
-  const targetEmail=(authUser.email||'').trim().toLowerCase();
-  const matched=users.find(u=>(u?.email||'').trim().toLowerCase()===targetEmail);
-  const source=matched || (users.length===1 ? users[0] : null);
-  if(!source) throw new Error(`Не вдалося визначити дані для імпорту. У backup знайдено користувачів: ${users.map(u=>u?.email).filter(Boolean).join(', ')||'невідомо'}.`);
+  if(!users.length) throw new Error('У резервній копії немає користувачів.');
+  const targetEmail=String(authUser.email||'').trim().toLowerCase();
+  const exact=users.find(u=>String(u?.email||'').trim().toLowerCase()===targetEmail);
+  const source=exact || (users.length===1 ? users[0] : null);
+  if(!source) throw new Error(`Не вдалося визначити користувача з backup. Поточний email: ${authUser.email||'невідомо'}. У backup: ${users.map(u=>u?.email||'без email').join(', ')}`);
   const sourceCredits=Array.isArray(source.credits)?source.credits:[];
   const sourceLimits=Array.isArray(source.limits)?source.limits:[];
-  if(!sourceCredits.length && !sourceLimits.length) throw new Error('У резервній копії немає розстрочок або кредитних лімітів.');
-  const [{data:existingCredits,error:creditsError},{data:existingLimits,error:limitsError}]=await Promise.all([
-    supabase.from('credits').select('id').eq('user_id',authUser.id),
-    supabase.from('credit_limits').select('id').eq('user_id',authUser.id)
-  ]);
-  if(creditsError) throw creditsError;
-  if(limitsError) throw limitsError;
-  const creditIds=new Set((existingCredits||[]).map(x=>x.id));
-  const limitIds=new Set((existingLimits||[]).map(x=>x.id));
-  const credits=sourceCredits.map(raw=>{const c=normalizeCredit(raw);return creditRow(authUser.id,{...c,id:c.id&&!creditIds.has(c.id)?c.id:uid()});});
-  const limits=sourceLimits.map(raw=>limitRow(authUser.id,{...raw,id:raw.id&&!limitIds.has(raw.id)?raw.id:uid()}));
-  if(credits.length){const {error}=await supabase.from('credits').insert(credits);if(error)throw error;}
-  if(limits.length){const {error}=await supabase.from('credit_limits').insert(limits);if(error)throw error;}
+  if(!sourceCredits.length && !sourceLimits.length) throw new Error(`У backup користувача «${source.name||source.email||'без імені'}» немає розстрочок або кредитних лімітів.`);
+  const credits=sourceCredits.map(raw=>{
+    const c=normalizeCredit(raw);
+    return creditRow(authUser.id,{...c,id:uid(),payments:Array.isArray(c.payments)?c.payments:[]});
+  });
+  const limits=sourceLimits.map(raw=>limitRow(authUser.id,{...raw,id:uid()}));
+  if(credits.length){const {error}=await supabase.from('credits').insert(credits);if(error)throw new Error(`Розстрочки не імпортовано: ${error.message}${error.details?` (${error.details})`:''}`)}
+  if(limits.length){const {error}=await supabase.from('credit_limits').insert(limits);if(error)throw new Error(`Кредитні ліміти не імпортовано: ${error.message}${error.details?` (${error.details})`:''}`)}
   await upsertCloudProfile({id:authUser.id,name:source.name||authUser.user_metadata?.name||'Користувач'},source.theme||'light');
-  return {credits:credits.length,limits:limits.length};
+  return {credits:credits.length,limits:limits.length,sourceName:source.name||'Користувач',sourceEmail:source.email||'без email'};
 }
 
 const uid=()=>crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
