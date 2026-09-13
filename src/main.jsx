@@ -1,13 +1,13 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Home,CreditCard,TrendingDown,CalendarDays,Settings,LogOut,Plus,Pencil,Trash2,Check,Moon,Sun,Menu,X,Download,FileText,ShieldCheck,Eye,EyeOff,Search,ArrowDownRight,Target,WalletCards,ArrowUpRight} from 'lucide-react';
+import {Home,CreditCard,TrendingDown,CalendarDays,Settings,LogOut,Plus,Pencil,Trash2,Check,Moon,Sun,Menu,X,Download,FileText,ShieldCheck,Eye,EyeOff,Search,ArrowDownRight,Upload,Target,WalletCards,ArrowUpRight} from 'lucide-react';
 import './styles.css';
 import { createClient } from '@supabase/supabase-js';
 
 const KEY='credit_manager_v2';
 const LEGACY_KEY='credit_manager_v1';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
@@ -20,7 +20,7 @@ const localBackup=()=>{try{return load()}catch{return emptyState()}};
 function mapCreditRow(r){return normalizeCredit({
   id:r.id,name:r.name,initialAmount:r.initial_amount,balance:r.balance,rate:r.rate,
   type:r.type,payment:r.payment,dueDay:r.due_day,termMonths:r.term_months,
-  interestPolicy:r.interest_policy,payments:Array.isArray(r.payments)?r.payments:[]
+  interestPolicy:r.interest_policy,paid:Boolean(r.paid),payments:Array.isArray(r.payments)?r.payments:[]
 })}
 function mapLimitRow(r){return {
   id:r.id,name:r.name,limit:r.credit_limit,used:r.used,rate:r.rate,
@@ -92,6 +92,41 @@ async function importLocalDataToCloud(authUser,localUser){
   if(credits.length){const {error}=await supabase.from('credits').upsert(credits,{onConflict:'id'});if(error)throw error}
   if(limits.length){const {error}=await supabase.from('credit_limits').upsert(limits,{onConflict:'id'});if(error)throw error}
   await upsertCloudProfile({id:authUser.id,name:localUser.name||authUser.user_metadata?.name||'Користувач'},localUser.theme||'light');
+}
+
+async function importBackupFileToCloud(authUser, file){
+  if(!supabase) throw new Error('Хмарне сховище Supabase не підключене.');
+  if(!file) throw new Error('Файл не вибрано.');
+  const text=await file.text();
+  let backup;
+  try{backup=JSON.parse(text)}catch{throw new Error('Файл має некоректний JSON-формат.')}
+  if(backup?.version!==1 || !Array.isArray(backup.users)) throw new Error('Це не резервна копія Credit Manager версії 1.');
+  const targetEmail=(authUser.email||'').trim().toLowerCase();
+  const sourceUser=backup.users.find(u=>(u?.email||'').trim().toLowerCase()===targetEmail);
+  if(!sourceUser) throw new Error(`У резервній копії не знайдено користувача ${authUser.email||''}.`);
+  const sourceCredits=Array.isArray(sourceUser.credits)?sourceUser.credits:[];
+  const sourceLimits=Array.isArray(sourceUser.limits)?sourceUser.limits:[];
+  if(!sourceCredits.length && !sourceLimits.length) throw new Error('У резервній копії немає розстрочок або кредитних лімітів.');
+
+  const {data:existingCredits,error:creditsError}=await supabase.from('credits').select('id').eq('user_id',authUser.id);
+  if(creditsError) throw creditsError;
+  const {data:existingLimits,error:limitsError}=await supabase.from('credit_limits').select('id').eq('user_id',authUser.id);
+  if(limitsError) throw limitsError;
+  const existingCreditIds=new Set((existingCredits||[]).map(x=>x.id));
+  const existingLimitIds=new Set((existingLimits||[]).map(x=>x.id));
+
+  // Keep source IDs whenever possible. If an ID already exists in this account, generate a new one to avoid overwriting cloud data.
+  const credits=sourceCredits.map(raw=>{
+    const normalized=normalizeCredit(raw);
+    return creditRow(authUser.id,{...normalized,id:normalized.id && !existingCreditIds.has(normalized.id)?normalized.id:uid()});
+  });
+  const limits=sourceLimits.map(raw=>{
+    const normalized={...raw,payments:Array.isArray(raw.payments)?raw.payments:[]};
+    return limitRow(authUser.id,{...normalized,id:normalized.id && !existingLimitIds.has(normalized.id)?normalized.id:uid()});
+  });
+  if(credits.length){const {error}=await supabase.from('credits').insert(credits);if(error)throw error}
+  if(limits.length){const {error}=await supabase.from('credit_limits').insert(limits);if(error)throw error}
+  return {credits:credits.length,limits:limits.length,sourceName:sourceUser.name||'Користувач'};
 }
 
 const uid=()=>crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
@@ -216,6 +251,17 @@ function App(){
   const saveCredit=c=>{const x=normalizeCredit({...c,balance:n(c.balance),initialAmount:n(c.initialAmount)||n(c.balance),rate:n(c.rate),payment:n(c.payment),dueDay:n(c.dueDay),termMonths:n(c.termMonths)});update(u=>({...u,credits:u.credits.some(z=>z.id===x.id)?u.credits.map(z=>z.id===x.id?x:z):[x,...u.credits]}));setModal(null)};
   const saveLimit=c=>{const x={...c,limit:n(c.limit),used:n(c.used),rate:n(c.rate),minPayment:n(c.minPayment),gracePayment:n(c.gracePayment),dueDay:n(c.dueDay)};update(u=>({...u,limits:u.limits.some(z=>z.id===x.id)?u.limits.map(z=>z.id===x.id?x:z):[x,...u.limits]}));setModal(null)};
   const removeCredit=id=>confirm('Видалити кредит?')&&update(u=>({...u,credits:u.credits.filter(c=>c.id!==id)}));const removeLimit=id=>confirm('Видалити кредитний ліміт?')&&update(u=>({...u,limits:u.limits.filter(c=>c.id!==id)}));
+  const importBackup=async file=>{
+    if(!file)return;
+    try{
+      setSyncError('');
+      if((credits.length||limits.length) && !confirm('У цьому акаунті вже є дані. Імпорт додасть старі дані, не видаляючи наявні. Продовжити?'))return;
+      const result=await importBackupFileToCloud({id:user.id,email:user.email,user_metadata:{name:user.name}},file);
+      await hydrate({id:user.id,email:user.email,user_metadata:{name:user.name}});
+      setSyncError(`Імпорт завершено: ${result.credits} розстрочок, ${result.limits} кредитних лімітів.`);
+      setTimeout(()=>setSyncError(''),5000);
+    }catch(e){setSyncError(e.message||'Не вдалося імпортувати резервну копію.');}
+  };
   const logout=async()=>{if(supabase)await supabase.auth.signOut();else{const s={...state,session:null};save(s);setState(s)}};
   const toggleTheme=async()=>{const next=state.theme==='dark'?'light':'dark';const s={...state,theme:next};setState(s);if(!cloudEnabled){save(s);return}try{await upsertCloudProfile(user,next);setSyncError('')}catch(e){setSyncError(e.message||'Не вдалося зберегти тему.')}};
   const resetPassword=async()=>{if(!supabase)return;const email=user.email;const{error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin});if(error)return alert(error.message);alert('Лист для зміни пароля надіслано на ваш email.')};
@@ -225,10 +271,10 @@ function App(){
 {view==='dashboard'&&<Dashboard user={user} credits={credits} limits={limits} onAddCredit={()=>setModal({type:'credit'})} onAddLimit={()=>setModal({type:'limit'})} onOpenCredit={c=>{setSelected(c);setView('details')}} onOpenLimit={c=>{setSelected(c);setView('limit-details')}} onPaymentCredit={c=>setPaymentModal({item:c,isLimit:false})} onPaymentLimit={c=>setPaymentModal({item:c,isLimit:true})}/>} 
 {view==='credits'&&<div className="view"><div className="page-title"><div><p className="eyebrow">КРЕДИТИ</p><h2>Мої кредити</h2></div><button className="btn primary desktop-add" onClick={()=>setModal({type:'credit'})}><Plus/> Додати</button></div><div className="credit-grid">{credits.map(c=><CreditCardView key={c.id} c={c} onEdit={()=>setModal({type:'credit',credit:c})} onDelete={()=>removeCredit(c.id)} onPayment={()=>setPaymentModal({item:c,isLimit:false})} onOpen={()=>{setSelected(c);setView('details')}}/>)}{!credits.length&&<Empty onAdd={()=>setModal({type:'credit'})}/>}</div></div>}
 {view==='limits'&&<div className="view"><div className="page-title"><div><p className="eyebrow">КРЕДИТНІ ЛІМІТИ</p><h2>Мої кредитні ліміти</h2><p className="muted">Окрема категорія для кредитних карток та боргу в межах ліміту.</p></div><div className="title-actions"><button className="btn secondary desktop-add" onClick={()=>setPlanModal(limits)} disabled={!limits.length}><Target/> План погашення</button><button className="btn primary desktop-add" onClick={()=>setModal({type:'limit'})}><Plus/> Додати</button></div></div><div className="credit-grid">{limits.map(c=><LimitCard key={c.id} c={c} onEdit={()=>setModal({type:'limit',limit:c})} onDelete={()=>removeLimit(c.id)} onPayment={()=>setPaymentModal({item:c,isLimit:true})} onPlan={()=>setPlanModal([c])}/>)}{!limits.length&&<Empty onAdd={()=>setModal({type:'limit'})} title="Кредитних лімітів ще немає" text="Додайте банк, ліміт, використану суму та ваші платіжні цілі."/>}</div></div>}
-{view==='payments'&&<Payments credits={credits} limits={limits} onPaymentCredit={c=>setPaymentModal({item:c,isLimit:false})} onPaymentLimit={c=>setPaymentModal({item:c,isLimit:true})}/>} {view==='settings'&&<SettingsView state={state} setState={setState} user={user} cloudEnabled={cloudEnabled} onResetPassword={resetPassword} onMigrate={localCandidate?migrateLocal:null} onToggleTheme={toggleTheme}/>} {view==='details'&&selected&&<Details c={credits.find(x=>x.id===selected.id)||selected} extra={extra} setExtra={setExtra} onBack={()=>setView('credits')} onEdit={c=>setModal({type:'credit',credit:c})} onPaid={c=>setPaymentModal({item:c,isLimit:false})}/>} {view==='limit-details'&&selected&&<LimitDetails c={limits.find(x=>x.id===selected.id)||selected} onBack={()=>setView('limits')} onEdit={c=>setModal({type:'limit',limit:c})} onPayment={c=>setPaymentModal({item:c,isLimit:true})} onPlan={c=>setPlanModal([c])}/>}</main></div><div className="mobile-fabs"><button className="fab" onClick={()=>setModal({type:'limit'})}><WalletCards/> Ліміт</button><button className="fab" onClick={()=>setModal({type:'credit'})}><Plus/> Кредит</button></div>{modal?.type==='credit'&&<CreditModal credit={modal.credit} onClose={()=>setModal(null)} onSave={saveCredit}/>} {modal?.type==='limit'&&<LimitModal limit={modal.limit} onClose={()=>setModal(null)} onSave={saveLimit}/>} {paymentModal&&<PaymentModal item={paymentModal.item} isLimit={paymentModal.isLimit} onClose={()=>setPaymentModal(null)} onSave={(kind,amount,date)=>makePayment(paymentModal.item,kind,amount,date,paymentModal.isLimit)}/>} {planModal&&<LimitPlan limits={planModal} onClose={()=>setPlanModal(null)} onSave={plan=>update(u=>({...u,limits:u.limits.map(l=>{const p=plan.find(x=>x.limitId===l.id);return p?{...l,planPayment:p.amount}:l})}))}/>}</div>
+{view==='payments'&&<Payments credits={credits} limits={limits} onPaymentCredit={c=>setPaymentModal({item:c,isLimit:false})} onPaymentLimit={c=>setPaymentModal({item:c,isLimit:true})}/>} {view==='settings'&&<SettingsView state={state} setState={setState} user={user} cloudEnabled={cloudEnabled} onResetPassword={resetPassword} onMigrate={localCandidate?migrateLocal:null} onToggleTheme={toggleTheme} onImportBackup={importBackup}/>} {view==='details'&&selected&&<Details c={credits.find(x=>x.id===selected.id)||selected} extra={extra} setExtra={setExtra} onBack={()=>setView('credits')} onEdit={c=>setModal({type:'credit',credit:c})} onPaid={c=>setPaymentModal({item:c,isLimit:false})}/>} {view==='limit-details'&&selected&&<LimitDetails c={limits.find(x=>x.id===selected.id)||selected} onBack={()=>setView('limits')} onEdit={c=>setModal({type:'limit',limit:c})} onPayment={c=>setPaymentModal({item:c,isLimit:true})} onPlan={c=>setPlanModal([c])}/></main></div><div className="mobile-fabs"><button className="fab" onClick={()=>setModal({type:'limit'})}><WalletCards/> Ліміт</button><button className="fab" onClick={()=>setModal({type:'credit'})}><Plus/> Кредит</button></div>{modal?.type==='credit'&&<CreditModal credit={modal.credit} onClose={()=>setModal(null)} onSave={saveCredit}/>} {modal?.type==='limit'&&<LimitModal limit={modal.limit} onClose={()=>setModal(null)} onSave={saveLimit}/>} {paymentModal&&<PaymentModal item={paymentModal.item} isLimit={paymentModal.isLimit} onClose={()=>setPaymentModal(null)} onSave={(kind,amount,date)=>makePayment(paymentModal.item,kind,amount,date,paymentModal.isLimit)}/>} {planModal&&<LimitPlan limits={planModal} onClose={()=>setPlanModal(null)} onSave={plan=>update(u=>({...u,limits:u.limits.map(l=>{const p=plan.find(x=>x.limitId===l.id);return p?{...l,planPayment:p.amount}:l})}))}/></div>
 }
 
 function Details({c,extra,setExtra,onBack,onEdit,onPaid}){const rows=schedule(c,extra),interest=rows.reduce((s,r)=>s+r.interest,0);return <div className="view"><button className="back" onClick={onBack}>← Назад</button><div className="page-title"><div><p className="eyebrow">КРЕДИТ</p><h2>{c.name}</h2><p className="muted">Залишок {money(c.balance)} · {c.rate}% річних</p></div><div className="title-actions"><button className="btn secondary" onClick={()=>onEdit(c)}><Pencil/> Редагувати</button><button className="btn primary" onClick={()=>onPaid(c)}><Check/> Внести платіж</button></div></div><div className="stats"><Stat icon={<CreditCard/>} label="Залишок" value={money(c.balance)} sub="поточний"/><Stat icon={<CalendarDays/>} label="Платіж" value={`Кожного ${c.dueDay}`} sub="числа"/><Stat icon={<TrendingDown/>} label="Строк" value={`${rows.length} міс.`} sub="поточний"/><Stat icon={<ArrowDownRight/>} label="Відсотки" value={money(interest)} sub="прогноз"/></div><div className="policy-summary"><ShieldCheck/><span>Дострокове погашення: <b>{c.interestPolicy==='full_term'?'відсотки за весь договірний строк':'відсотки за фактичні місяці користування'}</b></span><button className="btn secondary" onClick={()=>onEdit(c)}><Settings/> Налаштувати</button></div><section className="panel simulator"><div><h3>Додатковий платіж</h3><p className="muted">{money(extra)} / місяць</p></div><input type="range" min="0" max="20000" step="100" value={extra} onChange={e=>setExtra(n(e.target.value))}/></section><Schedule credits={[c]} extra={extra}/></div>}
-function SettingsView({state,setState,user,cloudEnabled,onResetPassword,onMigrate,onToggleTheme}){return <div className="view"><div className="page-title"><div><p className="eyebrow">ACCOUNT</p><h2>Налаштування</h2></div></div><section className="panel settings"><div className="setting"><div><b>Профіль</b><small>{user.email}</small></div></div><div className="setting"><div><b>Синхронізація</b><small>{cloudEnabled?'Акаунт зберігається в хмарі. Ви можете увійти з телефону, ПК та іншого пристрою.':'Локальний режим. Для синхронізації додайте Supabase.'}</small></div><ShieldCheck/></div>{cloudEnabled&&<div className="setting"><div><b>Пароль</b><small>Надіслати лист для зміни пароля</small></div><button className="btn secondary" onClick={onResetPassword}>Змінити</button></div>}{onMigrate&&<div className="setting"><div><b>Локальна резервна копія</b><small>Перенести старі кредити й ліміти з цього браузера у хмарний акаунт.</small></div><button className="btn secondary" onClick={onMigrate}>Імпортувати</button></div>}<div className="setting"><div><b>Тема</b><small>Світла або темна</small></div><button className="btn secondary" onClick={onToggleTheme}>{state.theme==='dark'?<Sun/>:<Moon/>}</button></div><div className="setting"><div><b>Дані</b><small>{cloudEnabled?'Кредити та ліміти зберігаються у вашому Supabase-проєкті та захищені RLS.':'Кредити та ліміти зберігаються локально у браузері.'}</small></div><ShieldCheck/></div></section></div>}
+function SettingsView({state,setState,user,cloudEnabled,onResetPassword,onMigrate,onToggleTheme,onImportBackup}){return <div className="view"><div className="page-title"><div><p className="eyebrow">ACCOUNT</p><h2>Налаштування</h2></div></div><section className="panel settings"><div className="setting"><div><b>Профіль</b><small>{user.email}</small></div></div><div className="setting"><div><b>Синхронізація</b><small>{cloudEnabled?'Акаунт зберігається в хмарі. Ви можете увійти з телефону, ПК та іншого пристрою.':'Локальний режим. Для синхронізації додайте Supabase.'}</small></div><ShieldCheck/></div>{cloudEnabled&&<div className="setting"><div><b>Пароль</b><small>Надіслати лист для зміни пароля</small></div><button className="btn secondary" onClick={onResetPassword}>Змінити</button></div>}{onMigrate&&<div className="setting"><div><b>Локальна резервна копія</b><small>Перенести старі кредити й ліміти з цього браузера у хмарний акаунт.</small></div><button className="btn secondary" onClick={onMigrate}>Імпортувати</button></div>}{cloudEnabled&&<div className="setting"><div><b>Імпорт зі старої версії</b><small>Виберіть файл <code>credit-manager-backup.json</code>. Будуть додані розстрочки, кредитні ліміти та історія платежів поточного email.</small></div><label className="btn secondary file-import"><Upload/> Вибрати файл<input type="file" accept="application/json,.json" onChange={e=>{const file=e.target.files?.[0];onImportBackup(file);e.target.value=''}}/></label></div>}<div className="setting"><div><b>Тема</b><small>Світла або темна</small></div><button className="btn secondary" onClick={onToggleTheme}>{state.theme==='dark'?<Sun/>:<Moon/>}</button></div><div className="setting"><div><b>Дані</b><small>{cloudEnabled?'Кредити та ліміти зберігаються у вашому Supabase-проєкті та захищені RLS.':'Кредити та ліміти зберігаються локально у браузері.'}</small></div><ShieldCheck/></div></section></div>}
 
 createRoot(document.getElementById('root')).render(<App/>);
