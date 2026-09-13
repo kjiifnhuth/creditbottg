@@ -26,8 +26,3 @@
 .cloud-status{display:flex;align-items:center;gap:7px;margin:0 0 14px;padding:10px 12px;border:1px solid var(--l);border-radius:12px;background:var(--s2);color:var(--m);font-size:10px}.cloud-status svg{width:15px;color:var(--g)}
 .sync-alert{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 13px;margin-bottom:14px;border:1px solid var(--l);border-radius:12px;background:var(--s);color:var(--m);font-size:11px}.sync-alert b{color:var(--t)}.sync-alert button{border:0;background:var(--a);color:#fff;border-radius:9px;padding:7px 10px;font-weight:700;font-size:10px}
 .btn:disabled{opacity:.55;cursor:not-allowed}
-
-/* Backup import */
-.file-import{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap}
-.file-import input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
-.settings code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;padding:2px 5px;border-radius:6px;background:rgba(124,92,255,.12)}
