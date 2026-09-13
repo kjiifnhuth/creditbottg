@@ -12,8 +12,8 @@ React + Vite + Supabase. Дані акаунтів і кредитів збер�
 2. Вкажи:
 
 ```env
-VITE_SUPABASE_URL=https://dejkdndptcotqikqsiho.supabase.co
-VITE_SUPABASE_ANON_KEY=sb_publishable_...
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_KEY
 ```
 
 3. Виконай:
@@ -41,7 +41,3 @@ npm run dev
 
 ## Безпека
 У фронтенді використовується тільки publishable/anon key. Service role key у браузер додавати не можна. Усі таблиці мають RLS-політики на `auth.uid()`.
-
-## Поточний Supabase
-
-Проєкт уже налаштований для використання змінних `VITE_SUPABASE_URL` і `VITE_SUPABASE_ANON_KEY`. Файл `.env` не додається до Git завдяки `.gitignore`. Для Render значення цих двох змінних треба додати в **Environment**.
