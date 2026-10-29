@@ -3059,7 +3059,23 @@ function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', state.theme === 'dark');
+    const isDark = state.theme === 'dark';
+    document.documentElement.classList.toggle('dark', isDark);
+    const bgColor = isDark ? '#0c0e13' : '#f4f6fa';
+    document.documentElement.style.backgroundColor = bgColor;
+    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+    if (document.body) document.body.style.backgroundColor = bgColor;
+    let metas = document.querySelectorAll('meta[name="theme-color"]');
+    if (!metas.length) {
+      const m = document.createElement('meta');
+      m.name = 'theme-color';
+      document.head.appendChild(m);
+      metas = [m];
+    }
+    metas.forEach(m => {
+      m.removeAttribute('media');
+      m.setAttribute('content', bgColor);
+    });
     if (!cloudEnabled) save(state);
   }, [state]);
 
@@ -3745,8 +3761,8 @@ function App() {
         </main>
       </div>
 
-      {/* Mobile Quick Action FAB */}
-      <div className="mobile-fab-wrap">
+      {/* Mobile Quick Action FAB (only on overview, credits, limits) */}
+      {(view === 'dashboard' || view === 'credits' || view === 'limits') && <div className="mobile-fab-wrap">
         {fabOpen && (
           <div className="fab-menu">
             <button type="button" onClick={() => { setFabOpen(false); setModal({ type: 'credit' }); }}>
@@ -3770,7 +3786,7 @@ function App() {
         >
           <Plus/>
         </button>
-      </div>
+      </div>}
 
       {/* Mobile Bottom Navigation Bar */}
       <nav className="bottom-nav" aria-label="Мобільна навігація">
